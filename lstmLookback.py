@@ -108,7 +108,7 @@ def smooth2(X, n): #drops n timestamps each n+1 timestamps on X
 
 
 type = "Cadvisor/" #Cadvisor/ Physical/
-train_dataset = "baseline6"
+train_dataset = "baseline"
 
 
 if __name__ == '__main__':
@@ -212,6 +212,7 @@ if __name__ == '__main__':
      
                      
             df=df.fillna(value=0) # first elem will be Nan after diff
+            dfPerc = df.pct_change(periods=600)
             reverse_df =  df.iloc[::-1] # reverse df for lookback
             
             # Gauges pre-processing
@@ -221,11 +222,11 @@ if __name__ == '__main__':
             # REGEX filtering
             regExString = 'scscf' # .* -> all features, change for use specific group of features
             columnToUse = reverse_df.filter(regex=regExString)  
-            
+            columnToUse = columnToUse.filter(regex='cpu') 
             ## LSTM data format and rescaling
             
             input_feature= columnToUse.values
-            input_feature_smooth = smooth2(columnToUse,4)
+            input_feature_smooth = smooth2(columnToUse,2)
             
 #            stdBoolA = input_feature_smooth.std() >= 0.00000001 # we only consider features with std > 0
 #            colToSmoothA = input_feature_smooth.columns[stdBoolA == True]
@@ -291,13 +292,13 @@ if __name__ == '__main__':
             def create_model(feature_size):
                 hidden_layer_size = int(feature_size*0.8)
                 print(hidden_layer_size)
-                hidden_layer_size2 = int(feature_size*0.7)
+                hidden_layer_size2 = int(feature_size*0.5)
                 print(hidden_layer_size2)
                 lstm_autoencoder = Sequential()
                 # Encoder
-                lstm_autoencoder.add(LSTM(hidden_layer_size, activation='linear', input_shape=(lookback,feature_size), return_sequences=True))
-                lstm_autoencoder.add(Dropout(0.2))
-                lstm_autoencoder.add(LSTM(hidden_layer_size2, activation='linear', return_sequences=False))
+                lstm_autoencoder.add(LSTM(hidden_layer_size, activation='elu', input_shape=(lookback,feature_size), return_sequences=True, name = 'encode1'))
+                lstm_autoencoder.add(Dropout(0.2, name = 'dropout_encode_1'))
+                lstm_autoencoder.add(LSTM(hidden_layer_size2, activation='elu', return_sequences=False, name = 'encode2'))
                 # lstm_autoencoder.add(LSTM(70, activation='relu', return_sequences=False))
                 # lstm_autoencoder.add(Dropout(0.2))
                 #lstm_autoencoder.add(LSTM(64, activation='relu', return_sequences=False))
@@ -310,16 +311,15 @@ if __name__ == '__main__':
                 #lstm_autoencoder.add(LSTM(64, activation='relu', return_sequences=True))
                 # lstm_autoencoder.add(LSTM(70, activation='relu', return_sequences=True))
                 # lstm_autoencoder.add(Dropout(0.2))
-                lstm_autoencoder.add(LSTM(hidden_layer_size, activation='linear', return_sequences=True))
-                lstm_autoencoder.add(Dropout(0.2))
-                lstm_autoencoder.add(LSTM(feature_size, activation='linear', return_sequences=True))
+                lstm_autoencoder.add(LSTM(hidden_layer_size, activation='elu', return_sequences=True, name = 'dencode1'))
+                lstm_autoencoder.add(Dropout(0.2, name = 'dropout_dencode_1'))
+                lstm_autoencoder.add(LSTM(feature_size, activation='linear', return_sequences=True, name = 'dencode2'))
                 #lstm_autoencoder.add(TimeDistributed(Dense(feature_size)))
 
                 lstm_autoencoder.summary()
-                
-               
+                               
             
-                lstm_autoencoder.compile(optimizer='rmsprop', loss='mean_squared_error',metrics=['mse'])
+                lstm_autoencoder.compile(optimizer='adam', loss='mean_squared_error',metrics=['mse'])
                 return lstm_autoencoder
             
             
@@ -347,6 +347,19 @@ if __name__ == '__main__':
             #sinlge train
             lstm_autoencoder_history = lstm_autoencoder.fit(X_train, X_train, validation_split=0.2, epochs=100, batch_size=128,verbose=2,callbacks=callbacks_list).history
     
+        def compose_encode(lstm_autoencoder):
+            encoder = Sequential()
+            encoder.add(lstm_autoencoder.get_layer(name='encode1'))
+            encoder.add(lstm_autoencoder.get_layer(name='dropout_encode_1'))
+            encoder.add(lstm_autoencoder.get_layer(name='encode2'))
+            return encoder
+        
+        encoder = compose_encode(lstm_autoencoder)
+        
+        encdoed_data = encoder.predict(X_train)
+        plt.figure()
+        plt.plot(encdoed_data)
+             
         # plot train and val loss           
         plt.figure()
         plt.plot(lstm_autoencoder_history['loss'], linewidth=2, label='Train')
@@ -375,6 +388,9 @@ if __name__ == '__main__':
         plt.title("Reconstructed")
         
        
+        errorDf = pd.DataFrame(flatten(X_train)-flatten(prediction_train),columns = columnToUse.columns)
+        errorDf.to_csv("ErrorTraining.csv",index=False)
+        
         perFeatureMSE = np.mean(np.power(flatten(X_train)-flatten(prediction_train),2), axis=0)
         plt.figure()
         plt.plot(perFeatureMSE)
@@ -401,7 +417,7 @@ if __name__ == '__main__':
         
         #col_mean =  np.mean(np.power(prediction_train-input_feature_df,2), axis=0)
         plt.figure(figsize=(16,9), dpi=80)
-        sns.distplot(scored['Loss_mae'],bins = 20000, kde = True, color = 'blue',norm_hist=True)
+        sns.distplot(scored['Loss_mae'],bins = 2000, kde = True, color = 'blue',norm_hist=True)
         thresholds = [ scored['Loss_mae'].mean()+scored['Loss_mae'].std(),  scored['Loss_mae'].mean()+2*scored['Loss_mae'].std(),  scored['Loss_mae'].mean()+3*scored['Loss_mae'].std()]
         scored['Threshold1'] = thresholds[0]
         scored['Anomaly1'] = scored['Loss_mae'] > scored ['Threshold1']
@@ -415,7 +431,7 @@ if __name__ == '__main__':
             
         predicted_values = []
         input_data_array = []
-        test_dataset = 'baselineFour'
+        test_dataset = 'baseline6'
         files2 = [open(type+test_dataset+"/"+file, 'r') for file in os.listdir(type+test_dataset)]
         for file_handler2 in files2: #iterates on toAnalyze files
             df2 = pd.DataFrame()
@@ -450,8 +466,8 @@ if __name__ == '__main__':
             ## nothing to do
                 
             # Normalization
-            columnToUse2 = reverse_df2.filter(input_feature_df.columns) #use same columns as in training phase
-            input_feature2_smooth = smooth2(columnToUse2,4)
+            columnToUse2 = reverse_df2.filter(columnToUse.columns) #use same columns as in training phase
+            input_feature2_smooth = smooth2(columnToUse2,2)
 #            input_feature2_smooth.reindex(axis='index')
             #input_feature2_smooth_values = input_feature2_smooth.values
 #            input_feature2_df = pd.DataFrame(input_feature2,columns = columnToUse2.columns)
@@ -475,14 +491,14 @@ if __name__ == '__main__':
             plt.title(test_dataset)
             
             
-            input_feature2_smooth_normalized_df = pd.DataFrame(input_feature2_smooth_normalized, columns= columnToUse2.columns)
-            bolT = input_feature2_smooth_normalized_df.mean() > 15
-            la = []
-            for i in range(0,len(bolT)):
-                if bolT[i] == True:
-                    print(i)
-                    la.append(i)
-            input_feature2_smooth_normalized_df.iloc[:,la].columns
+#            input_feature2_smooth_normalized_df = pd.DataFrame(input_feature2_smooth_normalized, columns= columnToUse2.columns)
+#            bolT = input_feature2_smooth_normalized_df.mean() > 15
+#            la = []
+#            for i in range(0,len(bolT)):
+#                if bolT[i] == True:
+#                    print(i)
+#                    la.append(i)
+#            input_feature2_smooth_normalized_df.iloc[:,la].columns
             
             
 #            input_feature2_smooth_normalized = input_feature2_smooth.values
@@ -560,7 +576,8 @@ if __name__ == '__main__':
             scored2.plot(title='Train')
            
             
-            
+            errorDfTest = pd.DataFrame(flatten(X_test)-flatten(prediction_test),columns = columnToUse.columns)
+            errorDfTest.to_csv("ErrorTest.csv",index=False)
             
           
             
