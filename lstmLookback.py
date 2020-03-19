@@ -222,8 +222,32 @@ if __name__ == '__main__':
             # REGEX filtering
             regExString = 'scscf' # .* -> all features, change for use specific group of features
             columnToUse = reverse_df.filter(regex=regExString)  
-            columnToUse = columnToUse.filter(regex='cpu') 
+            columnToUse.drop(list(columnToUse.filter(regex='container_memory_cache')),axis=1, inplace=True)
+            columnToUse.drop(list(columnToUse.filter(regex='container_spec')),axis=1, inplace=True)
+            columnToUse.drop(list(columnToUse.filter(regex='container_memory_max')),axis=1, inplace=True)
+            columnToUse.drop(list(columnToUse.filter(regex='container_last_seen')),axis=1, inplace=True)
+            columnToUse.drop(list(columnToUse.filter(regex='container_start_time_seconds')),axis=1, inplace=True)
+            columnToUse.drop(list(columnToUse.filter(regex='container_fs_limit')),axis=1, inplace=True)
+            columnToUse.drop(list(columnToUse.filter(regex='container_memory_mapped_filecontainer_memory_mapped_file')),axis=1, inplace=True) 
+            columnToUse.drop(list(columnToUse.filter(regex='container_memory_rss')),axis=1, inplace=True)  
+            columnToUse.drop(list(columnToUse.filter(regex='container_memory_mapped_file')),axis=1, inplace=True) 
+            columnToUse[list(columnToUse.filter(regex='.*_bytes|memory'))] /= 1000000000 #I rescaling everithing is in byte and memory related stats
+#            columnToUse = columnToUse.filter(regex='container_memory_cache') 
             ## LSTM data format and rescaling
+            
+            
+#            indexes = []
+#            boolA  = columnToUse.min() > 80
+#            for o in range(0,len(boolA)):
+#                if boolA[o] == True:
+#                    print(o)
+#                    indexes.append(o)
+#            
+#            colNames = []
+#            for elem in columnToUse.columns:
+#                colNames.append(elem.split('{')[0])
+#            setColNames = list(set(colNames))
+                
             
             input_feature= columnToUse.values
             input_feature_smooth = smooth2(columnToUse,2)
@@ -346,7 +370,12 @@ if __name__ == '__main__':
         
             #sinlge train
             lstm_autoencoder_history = lstm_autoencoder.fit(X_train, X_train, validation_split=0.2, epochs=100, batch_size=128,verbose=2,callbacks=callbacks_list).history
-    
+        
+        
+        
+#        modelNew = create_model(feature_size)
+#        modelNew.load_weights('weights-improvement-83-0.03.hdf5')
+        
         def compose_encode(lstm_autoencoder):
             encoder = Sequential()
             encoder.add(lstm_autoencoder.get_layer(name='encode1'))
@@ -354,12 +383,48 @@ if __name__ == '__main__':
             encoder.add(lstm_autoencoder.get_layer(name='encode2'))
             return encoder
         
+        
         encoder = compose_encode(lstm_autoencoder)
         
         encdoed_data = encoder.predict(X_train)
         plt.figure()
         plt.plot(encdoed_data)
              
+        
+           # import hierarchical clustering libraries
+        import scipy.cluster.hierarchy as sch
+        from sklearn.cluster import AgglomerativeClustering
+     
+                ##
+        
+        # create dendrogram
+#        import sys
+#        sys.setrecursionlimit(10000)
+        dendrogram = sch.dendrogram(sch.linkage(encdoed_data[:2000], method='ward'))
+        # create clusters
+        hc = AgglomerativeClustering(n_clusters=1, affinity = 'euclidean', linkage = 'ward')
+        plt.title('Dendrogram')
+        plt.xlabel('Customers')
+        plt.ylabel('Euclidean distances')
+        plt.show()
+        # save clusters for chart
+        y_hc = hc.fit_predict(curr_pca)
+        plt.figure()
+        plt.scatter(curr_pca[y_hc ==0,0], curr_pca[y_hc == 0,1], s=100, c='red')
+        plt.scatter(curr_pca[y_hc==1,0], curr_pca[y_hc == 1,1], s=100, c='black')
+        plt.scatter(curr_pca[y_hc ==2,0], curr_pca[y_hc == 2,1], s=100, c='blue')
+    #    plt.scatter(curr_pca[y_hc ==3,0], curr_pca[y_hc == 3,1], s=100, c='cyan')
+        plt.show   
+        ###
+    
+            
+        
+        
+        
+        
+        
+        
+        
         # plot train and val loss           
         plt.figure()
         plt.plot(lstm_autoencoder_history['loss'], linewidth=2, label='Train')
@@ -417,7 +482,7 @@ if __name__ == '__main__':
         
         #col_mean =  np.mean(np.power(prediction_train-input_feature_df,2), axis=0)
         plt.figure(figsize=(16,9), dpi=80)
-        sns.distplot(scored['Loss_mae'],bins = 2000, kde = True, color = 'blue',norm_hist=True)
+        #sns.distplot(scored['Loss_mae'],bins = 2000, kde = True, color = 'blue',norm_hist=True)
         thresholds = [ scored['Loss_mae'].mean()+scored['Loss_mae'].std(),  scored['Loss_mae'].mean()+2*scored['Loss_mae'].std(),  scored['Loss_mae'].mean()+3*scored['Loss_mae'].std()]
         scored['Threshold1'] = thresholds[0]
         scored['Anomaly1'] = scored['Loss_mae'] > scored ['Threshold1']
@@ -467,6 +532,7 @@ if __name__ == '__main__':
                 
             # Normalization
             columnToUse2 = reverse_df2.filter(columnToUse.columns) #use same columns as in training phase
+            columnToUse2[list(columnToUse2.filter(regex='.*_bytes|memory'))] /= 1000000000 #I rescaling everithing is in byte and memory related stats
             input_feature2_smooth = smooth2(columnToUse2,2)
 #            input_feature2_smooth.reindex(axis='index')
             #input_feature2_smooth_values = input_feature2_smooth.values
@@ -483,15 +549,22 @@ if __name__ == '__main__':
 #                else:
 #                     input_feature2_smooth.iloc[:,i] = (input_feature2_smooth.iloc[:,i]-sc.mean_[i])
             
-            dfConcat = pd.concat((df,df2),ignore_index=True,sort=False)
+            #dfConcat = pd.concat((df,df2),ignore_index=True,sort=False)
             input_feature2_smooth_normalized = sc.transform(input_feature2_smooth)
 
-            plt.figure()
-            plt.plot(input_feature2_smooth_normalized)
-            plt.title(test_dataset)
+#            plt.figure()
+#            plt.plot(input_feature2_smooth_normalized)
+#            plt.title(test_dataset)
             
+          
             
-#            input_feature2_smooth_normalized_df = pd.DataFrame(input_feature2_smooth_normalized, columns= columnToUse2.columns)
+            input_feature2_smooth_normalized_df = pd.DataFrame(input_feature2_smooth_normalized, columns= columnToUse2.columns)
+            indexes = []
+            boolA  = input_feature2_smooth_normalized_df.max() < -1000
+            for o in range(0,len(boolA)):
+                if boolA[o] == True:
+                    print(o)
+                    indexes.append(o)
 #            bolT = input_feature2_smooth_normalized_df.mean() > 15
 #            la = []
 #            for i in range(0,len(bolT)):
@@ -545,7 +618,7 @@ if __name__ == '__main__':
 #            y_surface = []
 #            z_surface = []
 #            for x in range(1,feature_size+1):
-#                for y in range(1,errorArray2.shape[0]+1):
+#                for y in range(1,int((errorArray2.shape[0]+1)/4)):
 #                    x_surface.append(x)
 #                    y_surface.append(y)
 #                    z_surface.append(int(errorArray2[y-1][x-1]))
@@ -564,7 +637,7 @@ if __name__ == '__main__':
             scored2['Loss_mae'] = np.mean(np.power(flatten(X_test)-flatten(prediction_test),2), axis=1)
             
             plt.figure(figsize=(16,9), dpi=80)
-            sns.distplot(scored2['Loss_mae'],bins = 20000, kde = True, color = 'blue',norm_hist=True)
+            #sns.distplot(scored2['Loss_mae'],bins = 20000, kde = True, color = 'blue',norm_hist=True)
             #thresholds = [ scored['Loss_mae'].mean()+scored['Loss_mae'].std(),  scored['Loss_mae'].mean()+2*scored['Loss_mae'].std(),  scored['Loss_mae'].mean()+3*scored['Loss_mae'].std()]
             scored2['Threshold1'] = thresholds[0]
             scored2['Anomaly1'] = scored['Loss_mae'] > scored ['Threshold1']
@@ -573,11 +646,17 @@ if __name__ == '__main__':
             scored2['Threshold3'] =  thresholds[2]
             scored2['Anomaly3'] = scored['Loss_mae'] > scored ['Threshold3']
             #scored.head()
-            scored2.plot(title='Train')
+            scored2.plot(title='Test')
            
             
             errorDfTest = pd.DataFrame(flatten(X_test)-flatten(prediction_test),columns = columnToUse.columns)
             errorDfTest.to_csv("ErrorTest.csv",index=False)
+            
+            maxIndexTest =  errorDfTest.idxmax()
+            maxCall  = maxIndexTest < 23000
+            for o in range(0,len(maxCall)):
+                if maxCall[o] == True:
+                    print(o)
             
           
             
